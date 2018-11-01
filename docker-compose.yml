@@ -1,26 +1,93 @@
-version: "3"
+version: '3'
 services:
-  redis:
-    image: "redis:4"
-    command: ["redis-server", "--appendonly", "yes"]
-    hostname: redis
-    restart: on-failure
-    volumes:
-      - ~/bridge_data/redis:/data
   rabbit:
-    image: "rabbitmq:3-management"
+    environment: ['RABBITMQ_NODENAME=node@rabbit']
     hostname: rabbit
-    environment:
-      - RABBITMQ_NODENAME=node@rabbit
-    volumes:
-      - ~/bridge_data/rabbitmq:/var/lib/rabbitmq/mnesia
-    restart: on-failure
+    image: rabbitmq:3
+    networks:
+      - net_db
+    restart: unless-stopped
+    volumes: ['~/bridge_data/rabbitmq:/var/lib/rabbitmq/mnesia']
+  redis:
+    command: [redis-server, --appendonly, 'yes']
+    hostname: redis
+    image: redis:4
+    networks:
+      - net_db
+    restart: unless-stopped
+    volumes: ['~/bridge_data/redis:/data']
   bridge:
     build: .
+    command: 'true'
+    env_file: ./.env
+    environment: ['NODE_ENV=production', 'QUEUE_URL=amqp://rabbit', 'REDIS_URL=redis://redis']
+    restart: on-failure
+  bridge_request:
+    build: .
+    command: 'true'
     env_file: ./.env
     environment:
       - NODE_ENV=production
       - QUEUE_URL=amqp://rabbit
       - REDIS_URL=redis://redis
-    command: "true"
-    restart: on-failure
+      - VALIDATOR_ADDRESS=${VALIDATOR_ADDRESS:-0x8fd379246834eac74B8419FfdA202CF8051F7A03}
+      - VALIDATOR_ADDRESS_PRIVATE_KEY=${VALIDATOR_ADDRESS_PRIVATE_KEY:-aaaaaaaaaaaaaaaaaaaaaaaaaaaab}
+    restart: unless-stopped
+    entrypoint: npm run watcher:signature-request
+    networks:
+      - net_request
+      - net_db
+  bridge_collected:
+    build: .
+    command: 'true'
+    env_file: ./.env
+    environment: ['NODE_ENV=production', 'QUEUE_URL=amqp://rabbit', 'REDIS_URL=redis://redis']
+    restart: unless-stopped
+    entrypoint: npm run watcher:collected-signatures
+    networks:
+      - net_collected
+      - net_db
+  bridge_affirmation:
+    build: .
+    command: 'true'
+    env_file: ./.env
+    environment: ['NODE_ENV=production', 'QUEUE_URL=amqp://rabbit', 'REDIS_URL=redis://redis']
+    restart: unless-stopped
+    entrypoint: npm run watcher:affirmation-request
+    networks:
+      - net_affirmation
+      - net_db
+  bridge_senderhome:
+    build: .
+    command: 'true'
+    env_file: ./.env
+    environment: ['NODE_ENV=production', 'QUEUE_URL=amqp://rabbit', 'REDIS_URL=redis://redis']
+    restart: unless-stopped
+    entrypoint: npm run sender:home
+    networks:
+      - net_senderhome
+      - net_db
+  bridge_senderforeign:
+    build: .
+    command: 'true'
+    env_file: ./.env
+    environment: ['NODE_ENV=production', 'QUEUE_URL=amqp://rabbit', 'REDIS_URL=redis://redis']
+    restart: unless-stopped
+    entrypoint: npm run sender:foreign
+    networks:
+      - net_senderforeign
+      - net_db
+
+networks:
+  net_db:
+    driver: bridge
+  net_request:
+    driver: bridge
+  net_collected:
+    driver: bridge
+  net_affirmation:
+    driver: bridge
+  net_senderhome:
+    driver: bridge
+  net_senderforeign:
+    driver: bridge
